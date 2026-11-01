@@ -89,6 +89,9 @@ class XamPortalHandler final : public rex::kernel::xam::NonControllerHandler {
   skylanders::portal::XamBridge bridge_;
 };
 
+std::mutex g_control_mutex;
+skylanders::FigureControl g_figure_control;
+
 XamPortalHandler g_xam_handler;
   // lives for the whole process, like the portals themselves
 
@@ -292,6 +295,13 @@ skylanders::portal::SoftwarePortal* SetUpSoftwarePortal() {
 // On failure (unknown mode, or USB requested but not found), logs a warning and leaves whatever
 // was already active running, rather than dropping to no portal.
 void SwitchPortalMode(std::string_view mode_text) {
+  {
+    std::lock_guard lock(g_control_mutex);
+    if (g_figure_control) {
+      REXLOG_WARN("Portal backend is locked while figure control is coordinated");
+      return;
+    }
+  }
   const auto mode = skylanders::portal::ParsePortalMode(mode_text);
   if (!mode) {
     REXLOG_WARN("Unknown portal_mode '{}'; leaving the current portal active (use 'software', "
@@ -371,17 +381,28 @@ void InstallPortal(const std::filesystem::path& default_figures_dir) {
   rex::kernel::xam::RegisterNonControllerHandler(&g_xam_handler);
 }
 
+void SetFigureControl(FigureControl control) {
+  std::lock_guard lock(g_control_mutex);
+  g_figure_control = std::move(control);
+}
+
 bool PlaceFigureFromFile(int slot, const std::filesystem::path& path) {
   portal::SoftwarePortal* software = g_software_portal.load();
   if (!software) return false;
   auto figure = portal::LoadFigureFile(path);
-  if (!figure) return false;
+  if (!figure || slot < 0 || slot >= portal::kMaxFigures) return false;
+  FigureControl control;
+  { std::lock_guard lock(g_control_mutex); control = g_figure_control; }
+  if (control) return control(slot, *figure, path);
   return software->PlaceFigure(slot, *figure, path);
 }
 
 bool RemoveFigureFromSlot(int slot) {
   portal::SoftwarePortal* software = g_software_portal.load();
-  if (!software) return false;
+  if (!software || slot < 0 || slot >= portal::kMaxFigures) return false;
+  FigureControl control;
+  { std::lock_guard lock(g_control_mutex); control = g_figure_control; }
+  if (control) return control(slot, std::nullopt, std::nullopt);
   return software->RemoveFigure(slot);
 }
 

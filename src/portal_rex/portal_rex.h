@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -37,6 +38,13 @@ namespace skylanders {
 // If the `portal_figures_dir` cvar is empty, it is set to `default_figures_dir` (which is created
 // if it doesn't exist yet) so the overlay has somewhere to look without the user passing a flag.
 void InstallPortal(const std::filesystem::path& default_figures_dir);
+
+// Optional coordinator (netplay): queue UI placements/removals instead of applying them now.
+// While set, locks the current portal backend. Install before guest launch; the callback may
+// run on the UI thread. Applying coordinated changes uses SoftwarePortal directly.
+using FigureControl = std::function<bool(int, const std::optional<portal::FigureData>&,
+                                        const std::optional<std::filesystem::path>&)>;
+void SetFigureControl(FigureControl control);
 
 // Loads the figure at `path` and places it in `slot`; future writes to that slot save back to
 // `path`, replacing any earlier file that slot saved to. Returns false, and changes nothing, if
